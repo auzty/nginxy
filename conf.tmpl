@@ -1,0 +1,73 @@
+upstream {{ .DomainName }} {
+ server {{ .ServiceName }}:{{ .ServicePort }};
+}
+
+{{ if ne .Ssl "true" }}
+
+### non SSL ####
+server {
+  listen 80;
+
+  server_name {{ .DomainName }};
+
+  server_tokens off;
+
+  location / {
+    try_files $uri $uri.html $uri/index.html @{{ .DomainName }};
+  }
+
+  location @{{ .DomainName }} {
+    proxy_read_timeout 60;
+    proxy_connect_timeout 60;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    proxy_pass http://{{ .DomainName }};
+  }
+}
+{{ end }}
+
+{{ if eq .Ssl "true" }}
+#### SSL Enabled ###
+
+# redirect to https if already have ssl
+server {
+  server_name {{ .DomainName }};
+  return 301 https://{{ .DomainName }}$request_uri;
+}
+
+
+server {
+  listen 443 ssl;
+
+  server_name {{ .DomainName }};
+
+  ssl_certificate /etc/nginx/certs/{{ .ServiceName }}/{{ .SslCert }};
+  ssl_certificate_key /etc/nginx/certs/{{ .ServiceName }}/{{ .SslKey }};
+
+  server_tokens off;
+
+  location / {
+      try_files $uri $uri.html $uri/index.html @{{ .DomainName }};
+  }
+
+  location @{{ .DomainName }} {
+
+    proxy_read_timeout 60;
+    proxy_connect_timeout 60;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    proxy_pass http://{{ .DomainName }};
+
+
+  }
+
+
+}
+
+{{ end }}
