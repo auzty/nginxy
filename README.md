@@ -46,6 +46,7 @@ nginxy-backend --attachable
 ```
 
 - Make sure the **nginxy** container run on **manager** node 
+
 ```bash
 docker service create --network nginxy-backend --name nginxy \
 --constraint 'node.role == manager' --publish 80:80 --publish 443:443 \
