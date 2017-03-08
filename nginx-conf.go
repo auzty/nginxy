@@ -33,17 +33,6 @@ func (org *Nginx) WriteConf() error {
   return nil
 }
 
-func (org *Nginx) DeleteConf() error {
-
-  path := "/etc/nginx/conf.d/"+org.ServiceName+".conf"
-  err := os.Remove(path)
-  if err != nil {
-    fmt.Println(err)
-    fmt.Println("ERRRORRRRR",path)
-  }
-  return nil
-}
-
 func reloadNginx(){
   pidloc := "/var/run/nginx.pid"
 

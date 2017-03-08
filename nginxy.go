@@ -4,7 +4,8 @@ import (
     "fmt"
     "log"
     "flag"
-//    "time"
+    "time"
+    "os"
     "github.com/fsouza/go-dockerclient"
 )
 
@@ -25,6 +26,7 @@ func failOnError(err error, msg string) {
 }
 
 var serviceCount = 0
+var serviceList []string
 func main() {
 
     filter := make(map[string][]string)
@@ -38,202 +40,184 @@ func main() {
     if err != nil {
       panic(err)
     }
-//    imgs, err := client.ListImages(docker.ListImagesOptions{All: false})
-//    test := make(map[string][]string)
-//    test["label"] = append(test["label"],"nginxy.ssl")
-//    imgs, err := client.ListServices(docker.ListServicesOptions{Filters: test })
+
+    // get the current list services and service count
+    serviceCount,serviceList := getServiceCount(client,filter)
+
     imgs, err := client.ListServices(docker.ListServicesOptions{Filters: filter})
     if err != nil {
       panic(err)
     }
     for _, img := range imgs {
-        serviceCount++ //increment the total service
-//      fmt.Println("Services : ", img)
-//      fmt.Println("Services name : ", img.Spec.Name)
-//      fmt.Println("Services label : ", img.Spec.Labels)
-
-
-
-
-      //--testing split label --
-//      fmt.Println("Labelnya : ",img.Spec.Labels["nginxy.domain"])
-//      fmt.Println("Labelnya : ",img.Spec.Labels["nginxy.ssl"])
-//      fmt.Println("Labelnya : ",img.Spec.Labels["nginxy.ssl.cert"])
-//      fmt.Println("Labelnya : ",img.Spec.Labels["nginxy.ssl.key"])
-//        fmt.Println("ID: ", img.ID)
-//        fmt.Println("RepoTags: ", img.RepoTags)
-//        fmt.Println("Created: ", img.Created)
-//        fmt.Println("Size: ", img.Size)
-//        fmt.Println("VirtualSize: ", img.VirtualSize)
-//        fmt.Println("ParentId: ", img.ParentID)
       if ((serviceCount != 0)&& (img.Spec.Labels["nginxy.domain"] != "")){
         // -- Generate the start configuration 
          name := img.Spec.Name
-         domain := img.Spec.Labels["nginxy.domain"]
-         port := img.Spec.Labels["nginxy.port"]
-         ssl := img.Spec.Labels["nginxy.ssl"]
-         key := img.Spec.Labels["nginxy.ssl.key"]
-         cert := img.Spec.Labels["nginxy.ssl.cert"]
 
-         nginxconf := Nginx{ServiceName:name,DomainName:domain,ServicePort:port,Ssl:ssl,SslKey:key,SslCert:cert}
-         fmt.Println(nginxconf)
-         nginxconf.WriteConf() // write the nginx configuration based on the name
-         reloadNginx()
+        // check configuration is exist or not 
+         _,filerr := os.Stat("/etc/nginx/conf.d/"+name+".conf")
+
+         if (filerr != nil){ // if didn't have configuration, then create the configuration
+
+           domain := img.Spec.Labels["nginxy.domain"]
+           port := img.Spec.Labels["nginxy.port"]
+           ssl := img.Spec.Labels["nginxy.ssl"]
+           key := img.Spec.Labels["nginxy.ssl.key"]
+           cert := img.Spec.Labels["nginxy.ssl.cert"]
+
+           nginxconf := Nginx{ServiceName:name,DomainName:domain,ServicePort:port,Ssl:ssl,SslKey:key,SslCert:cert}
+           fmt.Println(nginxconf)
+           nginxconf.WriteConf() // write the nginx configuration based on the name
+           reloadNginx()
+         } else {
+          log.Printf("File configuration of %s already exist, skip creating configuration for %s\n",img.Spec.Name)
+         }
 
       }
     }
 
     log.Println("Jumlah Service : ",serviceCount)
 
+// -- goruoutine start
 
+forever := make(chan bool)
 
+  go func() {
+    for 1 < 5 {
+      // execution go here
 
+      currentCount,currentList := getServiceCount(client,filter)
+//      fmt.Printf("Current list : %v , awal Service List : %v\n",currentList,serviceList)
+//      fmt.Printf("Current Count : %v , awal Service Count : %v\n",currentCount,serviceCount)
 
-if err != nil {
-    log.Fatal(err)
-}
+      // if currentCount > serviceCount do add new services
+      if(currentCount >  serviceCount) {
+       // new Services, create new configuration
 
-listener := make(chan *docker.APIEvents)
-err = client.AddEventListener(listener)
-if err != nil {
-    log.Fatal(err)
-}
+       // get the differences services (check for new services)
+       diff := difference(currentList,serviceList)
 
-defer func() {
+       for _, nama := range diff {
+         svcID := getServiceID(client,filter,nama)
 
-    err = client.RemoveEventListener(listener)
-    if err != nil {
-        log.Fatal(err)
-    }
+         detail, err := client.InspectService(svcID)
 
-}()
-
-//timeout := time.After(100 * time.Second)
-
-for {
-    select {
-    case msg := <-listener:
-
-
-      //if starting container (after docker service create) , will trigger this
-      action := msg.Action
-      status := msg.Type
-
-/*
-      // testing the swarm details
-      swarmdetails , err := client.InspectService(msg.Actor.Attributes["com.docker.swarm.service.id"])
-            if err != nil {
-                log.Fatal(err)
-            }
-      fmt.Println(msg)
-
-*/
-      // end of testing
-
-
-      //if(action == "start"){
-      swarmdetails , err := client.InspectService(msg.Actor.Attributes["com.docker.swarm.service.id"])
-      if(status == "container"){
-        if(action == "start") {
-          // lakukan checking service 
-          if((getServiceCount(client,filter) != serviceCount) && (swarmdetails.Spec.Labels["nginxy.domain"] != "")){ // jika ada service baru, maka execute 
-
-
-            if err != nil {
-                log.Fatal(err)
-            }
-
- /*          fmt.Println("---- name and labels goes down here -- ")
-           fmt.Println("nama service : ",swarmdetails.Spec.Name)
-           fmt.Println("hasil label : ",swarmdetails.Spec.Labels)
-           fmt.Println("jumlah service : ",getServiceCount(client))
-
-           //testing label swarm
-           fmt.Println("label domain : ",swarmdetails.Spec.Labels["nginxy.uri"])
-
-*/
-           //-- define every var to make variable shorter
-
-           name := swarmdetails.Spec.Name
-           domain := swarmdetails.Spec.Labels["nginxy.domain"]
-           port := swarmdetails.Spec.Labels["nginxy.port"]
-           ssl := swarmdetails.Spec.Labels["nginxy.ssl"]
-           key := swarmdetails.Spec.Labels["nginxy.ssl.key"]
-           cert := swarmdetails.Spec.Labels["nginxy.ssl.cert"]
-
-           //-- check the domain label is exist
-
-           if (domain != ""){
-             //-- assign to Nginx Struct to write the file configurations
-             nginxconf := Nginx{ServiceName:name,DomainName:domain,ServicePort:port,Ssl:ssl,SslKey:key,SslCert:cert}
-             fmt.Println(nginxconf)
-             nginxconf.WriteConf() // write the nginx configuration based on the name
-             reloadNginx()
-           }else {
-             log.Println("domain not set, please set")
-           }
-
-           // increment the service count
-           serviceCount++
-
-         }else{ // tak ada service baru
-           log.Println("No New Services")
+         if err != nil {
+          log.Println(err)
          }
 
-        }else if(action == "destroy"){
-          // -- destroy -> hapus container
-          if(getServiceCount(client,filter) != serviceCount){ // jika jumlah total service berbeda dengan sebelumnya, maka terjadi penghapusan service
-//            fmt.Println(msg)
-            nginxconf := Nginx{ServiceName:msg.Actor.Attributes["com.docker.swarm.service.name"]}
-            log.Println("penghapusan Service",nginxconf.ServiceName)
-            nginxconf.DeleteConf() // delete the existing configuration based on the name
-            reloadNginx()
-            serviceCount-- // decrement the service count
-//            fmt.Println((msg.Actor.Attributes["com.docker.swarm.service.name"]))
-          }
-        }
+         name := detail.Spec.Name
+         domain := detail.Spec.Labels["nginxy.domain"]
+         port := detail.Spec.Labels["nginxy.port"]
+         ssl := detail.Spec.Labels["nginxy.ssl"]
+         key := detail.Spec.Labels["nginxy.ssl.key"]
+         cert := detail.Spec.Labels["nginxy.ssl.cert"]
+
+         nginxconf := Nginx{ServiceName:name,DomainName:domain,ServicePort:port,Ssl:ssl,SslKey:key,SslCert:cert}
+         fmt.Println(nginxconf)
+         nginxconf.WriteConf() // write the nginx configuration based on the name
+         reloadNginx()
+
+       }
+
+        serviceList = currentList
+        serviceCount++
+        // increment the serviceCount
       }
 
-/*
-//        log.Println(msg.Action)
-//        log.Println(msg.Type)
-        log.Println(msg.Actor)
-        fmt.Println("ini attribut nya : ",msg.Actor.Attributes)
-        fmt.Println("testing : ", msg.Actor.Attributes["com.docker.swarm.service.id"])
+      if(currentCount < serviceCount) {
+      //  fmt.Printf("masuk hapus current list : %v , Service List : %v",currentList,serviceList)
+        // delete the configuration because the service is deleted
 
+        // get the differences
+        diff := difference(currentList,serviceList)
 
-        fmt.Println("ini coba spec element nya")
-        //fmt.Println(client.InspectService(msg.Actor.Attributes["com.docker.swarm.service.id"]))
-//        testing , err := client.InspectService(msg.Actor.Attributes["com.docker.swarm.service.id"])
-
-        if err != nil {
-            log.Fatal(err)
+        for _, nama := range diff {
+          path := "/etc/nginx/conf.d/"+nama+".conf"
+          err := os.Remove(path)
+          if err != nil {
+            log.Println(err)
+          }else{
+            serviceCount--
+            // how to delete the element ??
+            serviceList = currentList
+            reloadNginx()
+            log.Println("Removing service ",nama)
+          }
         }
 
+      }
 
-       fmt.Println("---- name and labels goes down here -- ")
-       fmt.Println(testing.Spec.Name)
-       fmt.Println(testing.Spec.Labels)
-       */
-
-//    case <-timeout:
-//        return
+      time.Sleep(1 * time.Second)
+      // end
     }
-}
+  }()
+
+log.Printf(" [*] Waiting for Docker Event(s). CTRL+C to exit\n")
+<-forever
+
+// -- goroutine end
+
 
 }
 
 
 // to get current service list
-func getServiceCount(client *docker.Client,filter map[string][]string) int{
+func getServiceCount(client *docker.Client,filter map[string][]string) (int ,[]string) {
 
+  var listSvc []string
   localCount := 0
   imgs, err := client.ListServices(docker.ListServicesOptions{Filters: filter})
     if err != nil {
         panic(err)
     }
-    for _,_ = range imgs {
+    for _,img := range imgs {
+      listSvc = append(listSvc,img.Spec.Name)
       localCount++
     }
- return localCount
+ return localCount,listSvc
+}
+
+
+// to get list of differences between 2 slices
+func difference(slice1 []string, slice2 []string) []string {
+  var diff []string
+
+  // Loop two times, first to find slice1 strings not in slice2,
+  // second loop to find slice2 strings not in slice1
+  for i := 0; i < 2; i++ {
+    for _, s1 := range slice1 {
+      found := false
+      for _, s2 := range slice2 {
+        if s1 == s2 {
+          found = true
+          break
+        }
+      }
+      // String not found. We add it to return slice
+      if !found {
+        diff = append(diff, s1)
+      }
+    }
+    // Swap the slices, only if it was the first loop
+    if i == 0 {
+      slice1, slice2 = slice2, slice1
+    }
+  }
+
+  return diff
+}
+
+// find the current Service ID's 
+func getServiceID( client *docker.Client,filter map[string][]string,name string) string {
+  imgs, err := client.ListServices(docker.ListServicesOptions{Filters: filter})
+    if err != nil {
+        panic(err)
+    }
+    for _,img := range imgs {
+      if(img.Spec.Name == name){
+        return img.ID
+        break
+      }
+    }
+    return ""
 }
